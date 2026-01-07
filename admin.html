@@ -53,17 +53,6 @@
         .language-switch {
             margin: 10px 0;
         }
-        .help-btn {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            z-index: 1000;
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            font-size: 24px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        }
         .simple-instruction {
             margin-bottom: 8px;
             font-size: 0.95rem;
@@ -73,12 +62,28 @@
             color: #0d6efd;
             font-weight: bold;
         }
+        /* Fixed Help Button Position */
+        .fixed-help-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-size: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        /* Published Success Toast */
+        .published-toast {
+            background-color: #198754 !important;
+        }
     </style>
 </head>
 <body class="bg-light">
     <div class="container mt-4">
-        <!-- Floating Help Button -->
-        <button class="btn btn-primary help-btn" id="helpButton" title="Help / मदद">
+        <!-- Fixed Help Button -->
+        <button class="btn btn-primary fixed-help-btn" id="helpButton" title="Help / मदद">
             ?
         </button>
 
@@ -383,11 +388,21 @@
         </div>
     </div>
 
-    <!-- Success Message Toast -->
+    <!-- Success Message Toasts -->
     <div id="successToast" class="toast align-items-center text-bg-success border-0 success-message" role="alert">
         <div class="d-flex">
             <div class="toast-body" id="toastMessage">
                 Successfully Saved!
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+
+    <!-- Published Success Toast -->
+    <div id="publishedToast" class="toast align-items-center text-bg-success border-0 success-message published-toast" role="alert" style="display: none;">
+        <div class="d-flex">
+            <div class="toast-body">
+                Result Published Successfully! ✓
             </div>
             <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
         </div>
@@ -481,8 +496,9 @@
         const resultModalTitle = document.getElementById('resultModalTitle');
         const resultDetails = document.getElementById('resultDetails');
         
-        // Toast Element
+        // Toast Elements
         const successToast = new bootstrap.Toast(document.getElementById('successToast'));
+        const publishedToast = new bootstrap.Toast(document.getElementById('publishedToast'));
         const toastMessage = document.getElementById('toastMessage');
         
         // App State
@@ -490,9 +506,25 @@
         let students = [];
         let editingStudentIndex = null;
         let editingDraftId = null;
+        let isEditingPublishedResult = false;
+        let editingPublishedResultId = null;
 
         // Directly show dashboard (no login required)
         showSection(dashboardSection);
+
+        // Vibration function
+        function vibrateButton() {
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+        }
+
+        // Add click vibration to all buttons
+        document.addEventListener('click', function(e) {
+            if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                vibrateButton();
+            }
+        });
 
         // Help Button Click Handler
         helpButton.addEventListener('click', () => {
@@ -531,14 +563,46 @@
         });
         
         backToDashboardBtn.addEventListener('click', () => {
-            showSection(dashboardSection);
+            if (isEditingPublishedResult && students.length > 0) {
+                // Auto-save the edited published result as draft before returning
+                autoSaveEditedPublishedResult();
+            } else {
+                showSection(dashboardSection);
+            }
         });
+        
         backToDashboardBtn2.addEventListener('click', () => {
             showSection(dashboardSection);
         });
+        
         backToDashboardBtn3.addEventListener('click', () => {
             showSection(dashboardSection);
         });
+
+        // Auto-save edited published result as draft
+        async function autoSaveEditedPublishedResult() {
+            if (!validateResultData()) {
+                showSection(dashboardSection);
+                return;
+            }
+            
+            try {
+                const resultData = {
+                    examName: examNameInput.value,
+                    subjects,
+                    students,
+                    createdAt: serverTimestamp()
+                };
+                
+                await addDoc(collection(db, "draft_results"), resultData);
+                showToast('Changes saved as draft!');
+                showSection(dashboardSection);
+            } catch (error) {
+                console.error('Error auto-saving draft:', error);
+                alert('Error auto-saving draft: ' + error.message);
+                showSection(dashboardSection);
+            }
+        }
 
         // Create Result - Step 1: Generate Subject Fields
         generateSubjectFieldsBtn.addEventListener('click', () => {
@@ -886,7 +950,8 @@
                     await deleteDoc(doc(db, "draft_results", editingDraftId));
                 }
                 
-                showToast('Result published successfully!');
+                // Show published success toast
+                publishedToast.show();
                 
                 // Reset form
                 resetCreateResultForm();
@@ -923,6 +988,8 @@
             students = [];
             studentsTableBody.innerHTML = '';
             editingDraftId = null;
+            isEditingPublishedResult = false;
+            editingPublishedResultId = null;
             cancelEdit();
         }
 
@@ -1021,6 +1088,7 @@
                     
                     // Set editing draft ID
                     editingDraftId = draftId;
+                    isEditingPublishedResult = false;
                     
                     // Show create result section
                     showSection(createResultSection);
@@ -1123,6 +1191,7 @@
                 }
                 
                 const data = resultDoc.docs[0].data();
+                const docId = resultDoc.docs[0].id;
                 
                 // Set form values
                 examNameInput.value = data.examName;
@@ -1152,14 +1221,14 @@
                     students = data.students;
                     updateStudentsTable();
                     
-                    // Set editing result ID
-                    editingDraftId = resultId;
+                    // Set editing flags
+                    editingDraftId = null;
+                    isEditingPublishedResult = true;
+                    editingPublishedResultId = docId;
                     
                     // Show create result section
                     showSection(createResultSection);
 
-                    // Delete the original result
-                    deleteResultFromDB(resultId);
                 }, 100);
 
                 showToast('Result loaded for editing!');
